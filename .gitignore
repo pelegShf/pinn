@@ -1,1 +1,7 @@
 */checkpoints/*
+
+# Virtual environment
+venv/
+venv\
+*.pyc
+__pycache__/

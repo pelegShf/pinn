@@ -148,18 +148,18 @@ class Model1(nn.Module):
     Architecture:
     - Input: (x, t, u) -> 3 dimensions
     - 5 hidden layers with 100 neurons each
-    - Output: Z (scalar)
-    - Loss: |Z| -> should minimize to zero
+    - Output: (z1, z2) -> 2 dimensions
+    - Loss: |z1 - z2| -> should minimize to zero
     """
 
     def __init__(self, config_dict=None):
         super(Model1, self).__init__()
 
-        # Fixed architecture: 3 -> 100 -> 100 -> 100 -> 100 -> 100 -> 1
+        # Fixed architecture: 3 -> 100 -> 100 -> 100 -> 100 -> 100 -> 2
         input_dim = 3  # (x, t, u)
         hidden_dim = 100
         n_layers = 5
-        output_dim = 1  # Z
+        output_dim = 2  # (z1, z2)
 
         # Build network layers
         layers = []
@@ -198,18 +198,19 @@ class Model1(nn.Module):
             u: solution value (batch_size, 1)
 
         Returns:
-            Z: output scalar (batch_size, 1)
+            Z: output vector (batch_size, 2) containing (z1, z2)
         """
         # Concatenate inputs
         inputs = torch.cat([x, t, u], dim=1)  # (batch_size, 3)
-        Z = self.network(inputs)
+        Z = self.network(inputs)  # (batch_size, 2)
         return Z
 
     def get_last_layer_weights(self):
-        """Get weights from last hidden layer to output Z"""
+        """Get weights from last hidden layer to output (z1, z2)"""
         # The last layer is self.network[-1] (the final Linear layer)
+        # Returns shape: weights (2, 100), bias (2,)
         last_layer = self.network[-1]
-        return last_layer.weight.data.cpu().numpy().flatten(), last_layer.bias.data.cpu().numpy()
+        return last_layer.weight.data.cpu().numpy(), last_layer.bias.data.cpu().numpy()
 
 
 class Model2(PINN):

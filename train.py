@@ -20,11 +20,11 @@ def loss_function_model1(model, x, t, u_true):
     """
     Loss function for Model 1
 
-    Model 1 takes triplet inputs (x, t, u) and outputs scalar Z
-    Loss: L = λ_z * mean(|Z|) + λ_norm * (L1_norm - target_norm)²
+    Model 1 takes triplet inputs (x, t, u) and outputs (z1, z2)
+    Loss: L = λ_z * mean(|z1 - z2|) + λ_norm * (output_L1_norm - target_norm)²
 
-    The target norm term encourages weights to stay near a target magnitude,
-    preventing both collapse to zero and unbounded growth.
+    The target norm term encourages the output vector (z1, z2) to have
+    an L1 norm near the target, preventing collapse to zero and unbounded growth.
 
     Args:
         model: Model1 instance
@@ -37,27 +37,28 @@ def loss_function_model1(model, x, t, u_true):
         loss_dict: dictionary with loss components
     """
     # Forward pass with triplet input (x, t, u)
-    Z = model(x, t, u_true)
+    Z = model(x, t, u_true)  # Shape: (batch_size, 2)
+    
+    # Split into z1 and z2
+    z1 = Z[:, 0:1]  # Shape: (batch_size, 1)
+    z2 = Z[:, 1:2]  # Shape: (batch_size, 1)
 
-    # Term 1: mean absolute value of Z
-    loss_z = torch.mean(torch.abs(Z))
+    # Term 1: mean absolute value of (z1 - z2)
+    loss_z = torch.mean(torch.abs(z1 - z2))
 
-    # Term 2: Target norm regularization for last layer weights
-    # Get the last linear layer (output layer)
-    last_layer = model.network[-1]  # This is the Linear layer that outputs Z
-    weights = last_layer.weight  # Shape: (1, 100)
-
-    # L1 norm: sum of absolute values
-    l1_norm = torch.sum(torch.abs(weights))
+    # Term 2: Target norm regularization for output vector (z1, z2)
+    # Compute L1 norm of output: |z1| + |z2| for each sample
+    output_l1_norm = torch.abs(z1) + torch.abs(z2)  # Shape: (batch_size, 1)
+    mean_output_l1_norm = torch.mean(output_l1_norm)  # Scalar
 
     # Get hyperparameters from config
     lambda_z = config.MODEL1_CONFIG.get('lambda_z', 1.0)
     lambda_norm = config.MODEL1_CONFIG.get('lambda_norm', 0.01)
     target_norm = config.MODEL1_CONFIG.get('target_norm', 50.0)
 
-    # Target norm penalty: (current_norm - target_norm)²
+    # Target norm penalty: (mean_output_l1_norm - target_norm)²
     # This creates a "sweet spot" at target_norm
-    norm_deviation = l1_norm - target_norm
+    norm_deviation = mean_output_l1_norm - target_norm
     loss_norm = norm_deviation ** 2
 
     # Total loss
@@ -67,11 +68,14 @@ def loss_function_model1(model, x, t, u_true):
         'total': loss.item(),
         'loss_z': loss_z.item(),
         'loss_norm': loss_norm.item(),
-        'l1_norm': l1_norm.item(),
+        'output_l1_norm': mean_output_l1_norm.item(),
         'norm_deviation': norm_deviation.item(),  # Signed difference from target
-        'Z_mean': torch.mean(Z).item(),
-        'Z_std': torch.std(Z).item(),
-        'Z_abs_mean': loss_z.item(),
+        'z1_mean': torch.mean(z1).item(),
+        'z1_std': torch.std(z1).item(),
+        'z2_mean': torch.mean(z2).item(),
+        'z2_std': torch.std(z2).item(),
+        'z1_z2_diff_mean': torch.mean(z1 - z2).item(),
+        'z1_z2_diff_abs_mean': loss_z.item(),
     }
 
     return loss, loss_dict
@@ -165,15 +169,18 @@ def train_model(
 
     # For Model1, track additional metrics
     if model_name == "model1":
-        history['Z_mean'] = []
-        history['Z_std'] = []
-        history['Z_abs_mean'] = []
-        history['loss_z'] = []  # Mean |Z| component
+        history['z1_mean'] = []
+        history['z1_std'] = []
+        history['z2_mean'] = []
+        history['z2_std'] = []
+        history['z1_z2_diff_mean'] = []
+        history['z1_z2_diff_abs_mean'] = []
+        history['loss_z'] = []  # Mean |z1 - z2| component
         history['loss_norm'] = []  # Target norm penalty component
-        history['l1_norm'] = []  # L1 norm value (positive)
+        history['output_l1_norm'] = []  # L1 norm of output vector (|z1| + |z2|)
         history['norm_deviation'] = []  # Signed difference from target
         if track_weights:
-            history['weights'] = []  # Track weight vector from last layer
+            history['weights'] = []  # Track weight matrix from last layer
 
     # For Model2, track Z metrics and MSE vs true
     if model_name == "model2":
@@ -229,8 +236,10 @@ def train_model(
 
                 # Different test loss for Model1 vs Model2
                 if model_name == "model1":
-                    Z = model(x, t, u)
-                    test_loss = torch.mean(torch.abs(Z))
+                    Z = model(x, t, u)  # Shape: (batch_size, 2)
+                    z1 = Z[:, 0:1]
+                    z2 = Z[:, 1:2]
+                    test_loss = torch.mean(torch.abs(z1 - z2))
                 elif model_name == "model2" and model1_frozen is not None:
                     # For Model2, test loss is Z mean from Model1
                     u_tilda = model(x, t)
@@ -251,12 +260,15 @@ def train_model(
 
         # Record model-specific metrics
         if model_name == "model1":
-            history['Z_mean'].append(avg_loss_dict.get('Z_mean', 0))
-            history['Z_std'].append(avg_loss_dict.get('Z_std', 0))
-            history['Z_abs_mean'].append(avg_loss_dict.get('Z_abs_mean', 0))
+            history['z1_mean'].append(avg_loss_dict.get('z1_mean', 0))
+            history['z1_std'].append(avg_loss_dict.get('z1_std', 0))
+            history['z2_mean'].append(avg_loss_dict.get('z2_mean', 0))
+            history['z2_std'].append(avg_loss_dict.get('z2_std', 0))
+            history['z1_z2_diff_mean'].append(avg_loss_dict.get('z1_z2_diff_mean', 0))
+            history['z1_z2_diff_abs_mean'].append(avg_loss_dict.get('z1_z2_diff_abs_mean', 0))
             history['loss_z'].append(avg_loss_dict.get('loss_z', 0))
             history['loss_norm'].append(avg_loss_dict.get('loss_norm', 0))
-            history['l1_norm'].append(avg_loss_dict.get('l1_norm', 0))
+            history['output_l1_norm'].append(avg_loss_dict.get('output_l1_norm', 0))
             history['norm_deviation'].append(avg_loss_dict.get('norm_deviation', 0))
 
             # Track weights if requested
@@ -277,9 +289,12 @@ def train_model(
                 print(
                     f"Epoch [{epoch+1}/{epochs}] "
                     f"Train Loss: {avg_train_loss:.6f} "
-                    f"Z_mean: {avg_loss_dict.get('Z_mean', 0):.6f} "
-                    f"Test Loss: {avg_test_loss:.6f} "
-                    f"Abs weight sum: {abs(weights).sum():.6f}"
+                    f"z1_mean: {avg_loss_dict.get('z1_mean', 0):.6f} "
+                    f"z2_mean: {avg_loss_dict.get('z2_mean', 0):.6f} "
+                    f"|z1-z2|: {avg_loss_dict.get('z1_z2_diff_abs_mean', 0):.6f} "
+                    f"output_L1: {avg_loss_dict.get('output_l1_norm', 0):.6f} "
+                    f"loss_norm: {avg_loss_dict.get('loss_norm', 0):.6f} "
+                    f"Test Loss: {avg_test_loss:.6f}"
                 )
             else:
                 print(
@@ -362,13 +377,14 @@ def main():
     )
 
     # Plot results for Model1
-    from utils import plot_model1_training, plot_model1_weights
+    from utils import plot_model1_training, plot_model1_weights, plot_z1_z2_evolution
     from datetime import datetime
     # Save each on a date/time folder
     date_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = Path(config.RESULTS_DIR) / date_time
     results_dir.mkdir(exist_ok=True)
     plot_model1_training(history1, save_path=f"{results_dir}/model1_training.png")
+    plot_z1_z2_evolution(history1, save_path=f"{results_dir}/model1_z1_z2_evolution.png")
     if 'weights' in history1:
         plot_model1_weights(history1, save_path=f"{results_dir}/model1_weights.png")
 

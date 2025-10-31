@@ -26,14 +26,14 @@ MODEL1_CONFIG = {
     'n_layers': 5,          # 5 hidden layers
     'output_dim': 1,        # Scalar Z
     'activation': 'tanh',
-    'learning_rate': 1e-4,
+    'learning_rate': 1e-5,
     'epochs': 2000,
     'batch_size': 256,
     # Loss weights
-    'lambda_z': 1.0,        # Weight for mean(|Z|) term
+    'lambda_z': 1.0,        # Weight for mean(|z1-z2|) term
     'lambda_norm': 0.01,    # Weight for target norm penalty
-    'target_norm': 1.0,     # Target L1 norm for last layer weights
-                            # (100 weights -> avg 0.01 per weight)
+    'target_norm': 10.0,     # Target L1 norm for output vector (|z1| + |z2|)
+                            # This controls the magnitude of the outputs
 }
 
 # Model 2 hyperparameters

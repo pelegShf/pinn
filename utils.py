@@ -296,14 +296,14 @@ def plot_model1_training(history, save_path=None):
     """
     Plot training curves for Model 1
 
-    Model 1 outputs scalar Z and minimizes: L = λ_z*mean(|Z|) + λ_norm*(L1_norm - target)²
+    Model 1 outputs (z1, z2) and minimizes: L = λ_z*mean(|z1-z2|) + λ_norm*(output_L1 - target)²
 
     Args:
         history: dictionary with training history
         save_path: path to save the figure
     """
     fig, axes = plt.subplots(3, 2, figsize=(16, 14))
-    fig.suptitle('Model 1 Training: L = λ_z*mean(|Z|) + λ_norm*(L1_norm - target)²',
+    fig.suptitle('Model 1 Training: L = λ_z*mean(|z1-z2|) + λ_norm*(output_L1 - target)²',
                  fontsize=16, fontweight='bold')
 
     epochs = np.arange(1, len(history['train_loss']) + 1)
@@ -322,7 +322,7 @@ def plot_model1_training(history, save_path=None):
     # Loss components
     ax2 = axes[0, 1]
     if 'loss_z' in history and 'loss_norm' in history:
-        ax2.plot(epochs, history['loss_z'], label='Loss_z (mean|Z|)', linewidth=2, color='green')
+        ax2.plot(epochs, history['loss_z'], label='Loss_z (mean|z1-z2|)', linewidth=2, color='green')
         ax2.plot(epochs, history['loss_norm'], label='Loss_norm (deviation²)', linewidth=2, color='orange')
         ax2.set_xlabel('Epoch', fontsize=12)
         ax2.set_ylabel('Loss Component', fontsize=12)
@@ -334,69 +334,90 @@ def plot_model1_training(history, save_path=None):
         ax2.text(0.5, 0.5, 'Loss components not tracked', ha='center', va='center',
                 transform=ax2.transAxes, fontsize=12)
 
-    # Z mean over time
+    # z1 and z2 means over time
     ax3 = axes[1, 0]
-    ax3.plot(epochs, history['Z_mean'], linewidth=2, color='green')
-    ax3.axhline(y=0, color='k', linestyle='--', alpha=0.5, linewidth=1)
-    ax3.set_xlabel('Epoch', fontsize=12)
-    ax3.set_ylabel('Z_mean', fontsize=12)
-    ax3.set_title('Mean of Z (should approach 0)', fontsize=14, fontweight='bold')
-    ax3.grid(True, alpha=0.3)
+    if 'z1_mean' in history and 'z2_mean' in history:
+        ax3.plot(epochs, history['z1_mean'], linewidth=2, color='blue', label='z1_mean')
+        ax3.plot(epochs, history['z2_mean'], linewidth=2, color='red', label='z2_mean')
+        ax3.axhline(y=0, color='k', linestyle='--', alpha=0.5, linewidth=1)
+        ax3.set_xlabel('Epoch', fontsize=12)
+        ax3.set_ylabel('Value', fontsize=12)
+        ax3.set_title('Mean of z1 and z2 (should converge)', fontsize=14, fontweight='bold')
+        ax3.legend(fontsize=11)
+        ax3.grid(True, alpha=0.3)
+    else:
+        ax3.text(0.5, 0.5, 'z1/z2 means not tracked', ha='center', va='center',
+                transform=ax3.transAxes, fontsize=12)
 
-    # Z standard deviation
+    # z1 and z2 standard deviations
     ax4 = axes[1, 1]
-    ax4.plot(epochs, history['Z_std'], linewidth=2, color='purple')
-    ax4.set_xlabel('Epoch', fontsize=12)
-    ax4.set_ylabel('Z_std', fontsize=12)
-    ax4.set_title('Standard Deviation of Z', fontsize=14, fontweight='bold')
-    ax4.grid(True, alpha=0.3)
+    if 'z1_std' in history and 'z2_std' in history:
+        ax4.plot(epochs, history['z1_std'], linewidth=2, color='blue', label='z1_std')
+        ax4.plot(epochs, history['z2_std'], linewidth=2, color='red', label='z2_std')
+        ax4.set_xlabel('Epoch', fontsize=12)
+        ax4.set_ylabel('Std Dev', fontsize=12)
+        ax4.set_title('Standard Deviation of z1 and z2', fontsize=14, fontweight='bold')
+        ax4.legend(fontsize=11)
+        ax4.grid(True, alpha=0.3)
+    else:
+        ax4.text(0.5, 0.5, 'z1/z2 stds not tracked', ha='center', va='center',
+                transform=ax4.transAxes, fontsize=12)
 
-    # L1 norm of weights with target line
+    # L1 norm of output vector (|z1| + |z2|) with target line
     ax5 = axes[2, 0]
-    if 'l1_norm' in history:
-        ax5.plot(epochs, history['l1_norm'], linewidth=2, color='red', label='Actual L1 Norm')
+    if 'output_l1_norm' in history:
+        ax5.plot(epochs, history['output_l1_norm'], linewidth=2, color='red', 
+                 label='Actual Output L1 Norm')
         # Add target norm as horizontal line
         if 'norm_deviation' in history:
-            # Infer target from deviation: target = l1_norm - deviation
-            target_norm = history['l1_norm'][-1] - history['norm_deviation'][-1]
+            # Infer target from deviation: target = output_l1_norm - deviation
+            target_norm = history['output_l1_norm'][-1] - history['norm_deviation'][-1]
             ax5.axhline(y=target_norm, color='green', linestyle='--', linewidth=2,
                        label=f'Target Norm ({target_norm:.1f})')
         ax5.set_xlabel('Epoch', fontsize=12)
-        ax5.set_ylabel('sum(|weights|)', fontsize=12)
-        ax5.set_title('L1 Norm vs Target (should converge to target)',
+        ax5.set_ylabel('mean(|z1| + |z2|)', fontsize=12)
+        ax5.set_title('Output L1 Norm vs Target (should converge)',
                      fontsize=14, fontweight='bold')
         ax5.legend(fontsize=10)
         ax5.grid(True, alpha=0.3)
     else:
-        ax5.text(0.5, 0.5, 'L1 norm not tracked', ha='center', va='center',
+        ax5.text(0.5, 0.5, 'Output L1 norm not tracked', ha='center', va='center',
                 transform=ax5.transAxes, fontsize=12)
 
-    # Z abs mean
+    # |z1-z2| abs mean (the main loss term)
     ax6 = axes[2, 1]
-    ax6.plot(epochs, history['Z_abs_mean'], linewidth=2, color='orange')
-    ax6.set_xlabel('Epoch', fontsize=12)
-    ax6.set_ylabel('mean(|Z|)', fontsize=12)
-    ax6.set_title('Mean Absolute Value of Z', fontsize=14, fontweight='bold')
-    ax6.grid(True, alpha=0.3)
-    ax6.set_yscale('log')
+    if 'z1_z2_diff_abs_mean' in history:
+        ax6.plot(epochs, history['z1_z2_diff_abs_mean'], linewidth=2, color='orange')
+        ax6.set_xlabel('Epoch', fontsize=12)
+        ax6.set_ylabel('mean(|z1-z2|)', fontsize=12)
+        ax6.set_title('Mean Absolute Difference |z1-z2|', fontsize=14, fontweight='bold')
+        ax6.grid(True, alpha=0.3)
+        ax6.set_yscale('log')
 
-    # Add final values as text
-    final_text = f"Final Values:\n"
-    final_text += f"Total Loss: {history['train_loss'][-1]:.6f}\n"
-    if 'loss_z' in history:
-        final_text += f"Loss_z: {history['loss_z'][-1]:.6f}\n"
-    if 'loss_norm' in history:
-        final_text += f"Loss_norm: {history['loss_norm'][-1]:.6f}\n"
-    if 'l1_norm' in history:
-        final_text += f"L1 norm: {history['l1_norm'][-1]:.4f}\n"
-    if 'norm_deviation' in history:
-        final_text += f"Deviation: {history['norm_deviation'][-1]:.4f}\n"
-    final_text += f"Z_mean: {history['Z_mean'][-1]:.6f}\n"
-    final_text += f"Z_std: {history['Z_std'][-1]:.6f}"
+        # Add final values as text
+        final_text = f"Final Values:\n"
+        final_text += f"Total Loss: {history['train_loss'][-1]:.6f}\n"
+        if 'loss_z' in history:
+            final_text += f"Loss_z: {history['loss_z'][-1]:.6f}\n"
+        if 'loss_norm' in history:
+            final_text += f"Loss_norm: {history['loss_norm'][-1]:.6f}\n"
+        if 'output_l1_norm' in history:
+            final_text += f"Output L1: {history['output_l1_norm'][-1]:.4f}\n"
+        if 'norm_deviation' in history:
+            final_text += f"Deviation: {history['norm_deviation'][-1]:.4f}\n"
+        if 'z1_mean' in history:
+            final_text += f"z1_mean: {history['z1_mean'][-1]:.6f}\n"
+        if 'z2_mean' in history:
+            final_text += f"z2_mean: {history['z2_mean'][-1]:.6f}\n"
+        if 'z1_z2_diff_abs_mean' in history:
+            final_text += f"|z1-z2|: {history['z1_z2_diff_abs_mean'][-1]:.6f}"
 
-    ax6.text(0.98, 0.98, final_text, transform=ax6.transAxes,
-             fontsize=10, verticalalignment='top', horizontalalignment='right',
-             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        ax6.text(0.98, 0.98, final_text, transform=ax6.transAxes,
+                 fontsize=10, verticalalignment='top', horizontalalignment='right',
+                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    else:
+        ax6.text(0.5, 0.5, '|z1-z2| not tracked', ha='center', va='center',
+                transform=ax6.transAxes, fontsize=12)
 
     plt.tight_layout()
 
@@ -407,11 +428,109 @@ def plot_model1_training(history, save_path=None):
     plt.show()
 
 
+def plot_z1_z2_evolution(history, save_path=None):
+    """
+    Plot z1 and z2 evolution over epochs for Model 1
+    
+    Shows how z1 and z2 values evolve during training and their convergence
+    
+    Args:
+        history: dictionary with training history (must contain z1_mean, z2_mean)
+        save_path: path to save the figure
+    """
+    if 'z1_mean' not in history or 'z2_mean' not in history:
+        print("No z1/z2 history found!")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('Model 1: z1 and z2 Evolution Over Training', fontsize=16, fontweight='bold')
+    
+    epochs = np.arange(1, len(history['z1_mean']) + 1)
+    
+    # Plot 1: z1 and z2 means
+    ax1 = axes[0, 0]
+    ax1.plot(epochs, history['z1_mean'], linewidth=2, color='blue', label='z1 mean')
+    ax1.plot(epochs, history['z2_mean'], linewidth=2, color='red', label='z2 mean')
+    ax1.axhline(y=0, color='k', linestyle='--', alpha=0.5, linewidth=1)
+    ax1.set_xlabel('Epoch', fontsize=12)
+    ax1.set_ylabel('Mean Value', fontsize=12)
+    ax1.set_title('z1 and z2 Mean Values', fontsize=14, fontweight='bold')
+    ax1.legend(fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Difference (z1 - z2)
+    ax2 = axes[0, 1]
+    if 'z1_z2_diff_mean' in history:
+        diff_mean = history['z1_z2_diff_mean']
+        ax2.plot(epochs, diff_mean, linewidth=2, color='green')
+        ax2.axhline(y=0, color='k', linestyle='--', alpha=0.5, linewidth=1)
+        ax2.set_xlabel('Epoch', fontsize=12)
+        ax2.set_ylabel('Difference', fontsize=12)
+        ax2.set_title('z1 - z2 (should approach 0)', fontsize=14, fontweight='bold')
+        ax2.grid(True, alpha=0.3)
+    else:
+        ax2.text(0.5, 0.5, 'Difference not tracked', ha='center', va='center',
+                transform=ax2.transAxes, fontsize=12)
+    
+    # Plot 3: Absolute difference |z1 - z2|
+    ax3 = axes[1, 0]
+    if 'z1_z2_diff_abs_mean' in history:
+        diff_abs = history['z1_z2_diff_abs_mean']
+        ax3.plot(epochs, diff_abs, linewidth=2, color='orange')
+        ax3.set_xlabel('Epoch', fontsize=12)
+        ax3.set_ylabel('|z1 - z2|', fontsize=12)
+        ax3.set_title('Absolute Difference |z1 - z2| (Loss Term)', fontsize=14, fontweight='bold')
+        ax3.grid(True, alpha=0.3)
+        ax3.set_yscale('log')
+    else:
+        ax3.text(0.5, 0.5, 'Absolute difference not tracked', ha='center', va='center',
+                transform=ax3.transAxes, fontsize=12)
+    
+    # Plot 4: z1 and z2 standard deviations
+    ax4 = axes[1, 1]
+    if 'z1_std' in history and 'z2_std' in history:
+        ax4.plot(epochs, history['z1_std'], linewidth=2, color='blue', label='z1 std', alpha=0.7)
+        ax4.plot(epochs, history['z2_std'], linewidth=2, color='red', label='z2 std', alpha=0.7)
+        ax4.set_xlabel('Epoch', fontsize=12)
+        ax4.set_ylabel('Standard Deviation', fontsize=12)
+        ax4.set_title('z1 and z2 Standard Deviations', fontsize=14, fontweight='bold')
+        ax4.legend(fontsize=11)
+        ax4.grid(True, alpha=0.3)
+    else:
+        ax4.text(0.5, 0.5, 'Standard deviations not tracked', ha='center', va='center',
+                transform=ax4.transAxes, fontsize=12)
+    
+    # Add summary statistics
+    final_text = f"Final Epoch Values:\n"
+    final_text += f"z1_mean: {history['z1_mean'][-1]:.6f}\n"
+    final_text += f"z2_mean: {history['z2_mean'][-1]:.6f}\n"
+    if 'z1_z2_diff_mean' in history:
+        final_text += f"z1-z2: {history['z1_z2_diff_mean'][-1]:.6f}\n"
+    if 'z1_z2_diff_abs_mean' in history:
+        final_text += f"|z1-z2|: {history['z1_z2_diff_abs_mean'][-1]:.6f}\n"
+    if 'z1_std' in history:
+        final_text += f"z1_std: {history['z1_std'][-1]:.6f}\n"
+    if 'z2_std' in history:
+        final_text += f"z2_std: {history['z2_std'][-1]:.6f}"
+    
+    ax4.text(0.98, 0.02, final_text, transform=ax4.transAxes,
+             fontsize=10, verticalalignment='bottom', horizontalalignment='right',
+             bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"z1/z2 evolution plot saved: {save_path}")
+    
+    plt.show()
+
+
 def plot_model1_weights(history, save_path=None):
     """
-    Plot weight vector evolution for Model 1
+    Plot weight matrix evolution for Model 1
 
-    Shows how the 100 weights from the last hidden layer to output Z evolve during training
+    Shows how the (2, 100) weights from the last hidden layer to output (z1, z2) evolve during training
 
     Args:
         history: dictionary with training history (must contain 'weights')
@@ -421,61 +540,158 @@ def plot_model1_weights(history, save_path=None):
         print("No weight history found!")
         return
 
-    weights_array = np.array(history['weights'])  # Shape: (n_epochs, 100)
-    n_epochs, n_weights = weights_array.shape
+    weights_array = np.array(history['weights'])  # Shape: (n_epochs, 2, 100)
+    n_epochs = weights_array.shape[0]
+    
+    # Check if we have the old format or new format
+    if len(weights_array.shape) == 2:
+        # Old format: (n_epochs, 100) - single output
+        n_weights = weights_array.shape[1]
+        z1_weights = weights_array  # All weights
+        z2_weights = None
+        has_two_outputs = False
+    else:
+        # New format: (n_epochs, 2, 100) - two outputs (z1, z2)
+        n_weights = weights_array.shape[2]
+        z1_weights = weights_array[:, 0, :]  # Shape: (n_epochs, 100)
+        z2_weights = weights_array[:, 1, :]  # Shape: (n_epochs, 100)
+        has_two_outputs = True
 
-    fig = plt.figure(figsize=(16, 10))
-    fig.suptitle('Model 1: Weight Vector Evolution (Last Layer → Z)', fontsize=16, fontweight='bold')
+    fig = plt.figure(figsize=(16, 12))
+    if has_two_outputs:
+        fig.suptitle('Model 1: Weight Matrix Evolution (Last Layer → [z1, z2])', 
+                     fontsize=16, fontweight='bold')
+    else:
+        fig.suptitle('Model 1: Weight Vector Evolution (Last Layer → Z)', 
+                     fontsize=16, fontweight='bold')
 
-    # Heatmap of weights over time
-    ax1 = plt.subplot(2, 2, 1)
-    im1 = ax1.imshow(weights_array.T, aspect='auto', cmap='RdBu_r',
-                     interpolation='nearest', vmin=-weights_array.max(), vmax=weights_array.max())
-    ax1.set_xlabel('Epoch', fontsize=12)
-    ax1.set_ylabel('Weight Index (0-99)', fontsize=12)
-    ax1.set_title('Weight Values Heatmap', fontsize=14, fontweight='bold')
-    cbar1 = fig.colorbar(im1, ax=ax1)
-    cbar1.set_label('Weight Value', fontsize=10)
-
-    # Individual weight trajectories (sample every 10th weight)
-    ax2 = plt.subplot(2, 2, 2)
     epochs = np.arange(1, n_epochs + 1)
-    for i in range(0, n_weights, 10):  # Plot every 10th weight
-        ax2.plot(epochs, weights_array[:, i], alpha=0.7, linewidth=1)
-    ax2.set_xlabel('Epoch', fontsize=12)
-    ax2.set_ylabel('Weight Value', fontsize=12)
-    ax2.set_title('Weight Trajectories (every 10th weight)', fontsize=14, fontweight='bold')
-    ax2.grid(True, alpha=0.3)
-    ax2.axhline(y=0, color='k', linestyle='--', alpha=0.5)
+    
+    if has_two_outputs:
+        # Plot for z1 and z2 separately
+        # Row 1: Heatmaps for z1 and z2
+        ax1 = plt.subplot(3, 2, 1)
+        im1 = ax1.imshow(z1_weights.T, aspect='auto', cmap='RdBu_r',
+                         interpolation='nearest', 
+                         vmin=-weights_array.max(), vmax=weights_array.max())
+        ax1.set_xlabel('Epoch', fontsize=12)
+        ax1.set_ylabel('Weight Index (0-99)', fontsize=12)
+        ax1.set_title('z1 Weights Heatmap', fontsize=14, fontweight='bold')
+        cbar1 = fig.colorbar(im1, ax=ax1)
+        cbar1.set_label('Weight Value', fontsize=10)
 
-    # Weight distribution at start vs end
-    ax3 = plt.subplot(2, 2, 3)
-    ax3.hist(weights_array[0, :], bins=30, alpha=0.6, label='Initial', color='blue', edgecolor='black')
-    ax3.hist(weights_array[-1, :], bins=30, alpha=0.6, label='Final', color='red', edgecolor='black')
-    ax3.set_xlabel('Weight Value', fontsize=12)
-    ax3.set_ylabel('Frequency', fontsize=12)
-    ax3.set_title('Weight Distribution: Initial vs Final', fontsize=14, fontweight='bold')
-    ax3.legend(fontsize=11)
-    ax3.grid(True, alpha=0.3)
+        ax2 = plt.subplot(3, 2, 2)
+        im2 = ax2.imshow(z2_weights.T, aspect='auto', cmap='RdBu_r',
+                         interpolation='nearest', 
+                         vmin=-weights_array.max(), vmax=weights_array.max())
+        ax2.set_xlabel('Epoch', fontsize=12)
+        ax2.set_ylabel('Weight Index (0-99)', fontsize=12)
+        ax2.set_title('z2 Weights Heatmap', fontsize=14, fontweight='bold')
+        cbar2 = fig.colorbar(im2, ax=ax2)
+        cbar2.set_label('Weight Value', fontsize=10)
 
-    # Weight statistics over time
-    ax4 = plt.subplot(2, 2, 4)
-    weight_means = np.mean(weights_array, axis=1)
-    weight_stds = np.std(weights_array, axis=1)
-    weight_mins = np.min(weights_array, axis=1)
-    weight_maxs = np.max(weights_array, axis=1)
+        # Row 2: Weight trajectories
+        ax3 = plt.subplot(3, 2, 3)
+        for i in range(0, n_weights, 10):
+            ax3.plot(epochs, z1_weights[:, i], alpha=0.7, linewidth=1)
+        ax3.set_xlabel('Epoch', fontsize=12)
+        ax3.set_ylabel('Weight Value', fontsize=12)
+        ax3.set_title('z1 Weight Trajectories (every 10th)', fontsize=14, fontweight='bold')
+        ax3.grid(True, alpha=0.3)
+        ax3.axhline(y=0, color='k', linestyle='--', alpha=0.5)
 
-    ax4.plot(epochs, weight_means, label='Mean', linewidth=2, color='blue')
-    ax4.fill_between(epochs, weight_means - weight_stds, weight_means + weight_stds,
-                      alpha=0.3, label='±1 std', color='blue')
-    ax4.plot(epochs, weight_mins, label='Min', linewidth=1, linestyle='--', color='green')
-    ax4.plot(epochs, weight_maxs, label='Max', linewidth=1, linestyle='--', color='red')
-    ax4.axhline(y=0, color='k', linestyle='--', alpha=0.5)
-    ax4.set_xlabel('Epoch', fontsize=12)
-    ax4.set_ylabel('Weight Value', fontsize=12)
-    ax4.set_title('Weight Statistics Over Training', fontsize=14, fontweight='bold')
-    ax4.legend(fontsize=10)
-    ax4.grid(True, alpha=0.3)
+        ax4 = plt.subplot(3, 2, 4)
+        for i in range(0, n_weights, 10):
+            ax4.plot(epochs, z2_weights[:, i], alpha=0.7, linewidth=1)
+        ax4.set_xlabel('Epoch', fontsize=12)
+        ax4.set_ylabel('Weight Value', fontsize=12)
+        ax4.set_title('z2 Weight Trajectories (every 10th)', fontsize=14, fontweight='bold')
+        ax4.grid(True, alpha=0.3)
+        ax4.axhline(y=0, color='k', linestyle='--', alpha=0.5)
+
+        # Row 3: Statistics
+        ax5 = plt.subplot(3, 2, 5)
+        z1_means = np.mean(z1_weights, axis=1)
+        z1_stds = np.std(z1_weights, axis=1)
+        ax5.plot(epochs, z1_means, label='Mean', linewidth=2, color='blue')
+        ax5.fill_between(epochs, z1_means - z1_stds, z1_means + z1_stds,
+                          alpha=0.3, label='±1 std', color='blue')
+        ax5.plot(epochs, np.min(z1_weights, axis=1), label='Min', 
+                 linewidth=1, linestyle='--', color='green')
+        ax5.plot(epochs, np.max(z1_weights, axis=1), label='Max', 
+                 linewidth=1, linestyle='--', color='red')
+        ax5.axhline(y=0, color='k', linestyle='--', alpha=0.5)
+        ax5.set_xlabel('Epoch', fontsize=12)
+        ax5.set_ylabel('Weight Value', fontsize=12)
+        ax5.set_title('z1 Weight Statistics', fontsize=14, fontweight='bold')
+        ax5.legend(fontsize=9)
+        ax5.grid(True, alpha=0.3)
+
+        ax6 = plt.subplot(3, 2, 6)
+        z2_means = np.mean(z2_weights, axis=1)
+        z2_stds = np.std(z2_weights, axis=1)
+        ax6.plot(epochs, z2_means, label='Mean', linewidth=2, color='blue')
+        ax6.fill_between(epochs, z2_means - z2_stds, z2_means + z2_stds,
+                          alpha=0.3, label='±1 std', color='blue')
+        ax6.plot(epochs, np.min(z2_weights, axis=1), label='Min', 
+                 linewidth=1, linestyle='--', color='green')
+        ax6.plot(epochs, np.max(z2_weights, axis=1), label='Max', 
+                 linewidth=1, linestyle='--', color='red')
+        ax6.axhline(y=0, color='k', linestyle='--', alpha=0.5)
+        ax6.set_xlabel('Epoch', fontsize=12)
+        ax6.set_ylabel('Weight Value', fontsize=12)
+        ax6.set_title('z2 Weight Statistics', fontsize=14, fontweight='bold')
+        ax6.legend(fontsize=9)
+        ax6.grid(True, alpha=0.3)
+
+    else:
+        # Old format: single output visualization (4 subplots)
+        ax1 = plt.subplot(2, 2, 1)
+        im1 = ax1.imshow(z1_weights.T, aspect='auto', cmap='RdBu_r',
+                         interpolation='nearest', 
+                         vmin=-z1_weights.max(), vmax=z1_weights.max())
+        ax1.set_xlabel('Epoch', fontsize=12)
+        ax1.set_ylabel('Weight Index (0-99)', fontsize=12)
+        ax1.set_title('Weight Values Heatmap', fontsize=14, fontweight='bold')
+        cbar1 = fig.colorbar(im1, ax=ax1)
+        cbar1.set_label('Weight Value', fontsize=10)
+
+        ax2 = plt.subplot(2, 2, 2)
+        for i in range(0, n_weights, 10):
+            ax2.plot(epochs, z1_weights[:, i], alpha=0.7, linewidth=1)
+        ax2.set_xlabel('Epoch', fontsize=12)
+        ax2.set_ylabel('Weight Value', fontsize=12)
+        ax2.set_title('Weight Trajectories (every 10th)', fontsize=14, fontweight='bold')
+        ax2.grid(True, alpha=0.3)
+        ax2.axhline(y=0, color='k', linestyle='--', alpha=0.5)
+
+        ax3 = plt.subplot(2, 2, 3)
+        ax3.hist(z1_weights[0, :], bins=30, alpha=0.6, label='Initial', 
+                 color='blue', edgecolor='black')
+        ax3.hist(z1_weights[-1, :], bins=30, alpha=0.6, label='Final', 
+                 color='red', edgecolor='black')
+        ax3.set_xlabel('Weight Value', fontsize=12)
+        ax3.set_ylabel('Frequency', fontsize=12)
+        ax3.set_title('Weight Distribution: Initial vs Final', fontsize=14, fontweight='bold')
+        ax3.legend(fontsize=11)
+        ax3.grid(True, alpha=0.3)
+
+        ax4 = plt.subplot(2, 2, 4)
+        weight_means = np.mean(z1_weights, axis=1)
+        weight_stds = np.std(z1_weights, axis=1)
+        ax4.plot(epochs, weight_means, label='Mean', linewidth=2, color='blue')
+        ax4.fill_between(epochs, weight_means - weight_stds, weight_means + weight_stds,
+                          alpha=0.3, label='±1 std', color='blue')
+        ax4.plot(epochs, np.min(z1_weights, axis=1), label='Min', 
+                 linewidth=1, linestyle='--', color='green')
+        ax4.plot(epochs, np.max(z1_weights, axis=1), label='Max', 
+                 linewidth=1, linestyle='--', color='red')
+        ax4.axhline(y=0, color='k', linestyle='--', alpha=0.5)
+        ax4.set_xlabel('Epoch', fontsize=12)
+        ax4.set_ylabel('Weight Value', fontsize=12)
+        ax4.set_title('Weight Statistics Over Training', fontsize=14, fontweight='bold')
+        ax4.legend(fontsize=10)
+        ax4.grid(True, alpha=0.3)
 
     plt.tight_layout()
 
@@ -487,20 +703,45 @@ def plot_model1_weights(history, save_path=None):
 
     # Print summary statistics
     print("\n" + "=" * 60)
-    print("WEIGHT VECTOR SUMMARY")
+    print("WEIGHT MATRIX SUMMARY")
     print("=" * 60)
-    print(f"Number of weights: {n_weights}")
-    print(f"Epochs tracked: {n_epochs}")
-    print(f"\nInitial weights:")
-    print(f"  Mean: {weights_array[0, :].mean():.6f}")
-    print(f"  Std:  {weights_array[0, :].std():.6f}")
-    print(f"  Min:  {weights_array[0, :].min():.6f}")
-    print(f"  Max:  {weights_array[0, :].max():.6f}")
-    print(f"\nFinal weights:")
-    print(f"  Mean: {weights_array[-1, :].mean():.6f}")
-    print(f"  Std:  {weights_array[-1, :].std():.6f}")
-    print(f"  Min:  {weights_array[-1, :].min():.6f}")
-    print(f"  Max:  {weights_array[-1, :].max():.6f}")
+    if has_two_outputs:
+        print(f"Number of weights per output: {n_weights}")
+        print(f"Total weights: {2 * n_weights}")
+        print(f"Epochs tracked: {n_epochs}")
+        print(f"\nz1 weights - Initial:")
+        print(f"  Mean: {z1_weights[0, :].mean():.6f}")
+        print(f"  Std:  {z1_weights[0, :].std():.6f}")
+        print(f"  Min:  {z1_weights[0, :].min():.6f}")
+        print(f"  Max:  {z1_weights[0, :].max():.6f}")
+        print(f"\nz1 weights - Final:")
+        print(f"  Mean: {z1_weights[-1, :].mean():.6f}")
+        print(f"  Std:  {z1_weights[-1, :].std():.6f}")
+        print(f"  Min:  {z1_weights[-1, :].min():.6f}")
+        print(f"  Max:  {z1_weights[-1, :].max():.6f}")
+        print(f"\nz2 weights - Initial:")
+        print(f"  Mean: {z2_weights[0, :].mean():.6f}")
+        print(f"  Std:  {z2_weights[0, :].std():.6f}")
+        print(f"  Min:  {z2_weights[0, :].min():.6f}")
+        print(f"  Max:  {z2_weights[0, :].max():.6f}")
+        print(f"\nz2 weights - Final:")
+        print(f"  Mean: {z2_weights[-1, :].mean():.6f}")
+        print(f"  Std:  {z2_weights[-1, :].std():.6f}")
+        print(f"  Min:  {z2_weights[-1, :].min():.6f}")
+        print(f"  Max:  {z2_weights[-1, :].max():.6f}")
+    else:
+        print(f"Number of weights: {n_weights}")
+        print(f"Epochs tracked: {n_epochs}")
+        print(f"\nInitial weights:")
+        print(f"  Mean: {z1_weights[0, :].mean():.6f}")
+        print(f"  Std:  {z1_weights[0, :].std():.6f}")
+        print(f"  Min:  {z1_weights[0, :].min():.6f}")
+        print(f"  Max:  {z1_weights[0, :].max():.6f}")
+        print(f"\nFinal weights:")
+        print(f"  Mean: {z1_weights[-1, :].mean():.6f}")
+        print(f"  Std:  {z1_weights[-1, :].std():.6f}")
+        print(f"  Min:  {z1_weights[-1, :].min():.6f}")
+        print(f"  Max:  {z1_weights[-1, :].max():.6f}")
     print("=" * 60)
 
 
