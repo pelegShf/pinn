@@ -1,0 +1,18 @@
+# Physics-Informed Neural Networks for 1D Wave Equation
+# Python 3.8+
+
+# Core dependencies
+torch>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+Pillow>=9.0.0
+PyYAML>=6.0.0
+pandas>=2.0.0
+
+# Optional but recommended
+scipy>=1.10.0
+tqdm>=4.65.0
+
+# For Jupyter notebooks (optional)
+jupyter>=1.0.0
+ipykernel>=6.0.0

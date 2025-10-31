@@ -1,0 +1,55 @@
+# Grid Search Configuration for Model 1
+# Explores different combinations of hyperparameters
+
+# Model architecture (fixed for now)
+model:
+  input_dim: 3
+  hidden_dim: 100
+  n_layers: 5
+  output_dim: 1
+  activation: tanh
+
+# Training parameters
+training:
+  epochs: 2000
+  batch_size: 256
+
+# Grid search parameters
+# Each parameter can have multiple values to try
+grid_search:
+  learning_rate:
+    - 0.001
+    - 0.0005
+    - 0.0001
+
+  lambda_z:
+    - 0.5
+    - 1.0
+    - 2.0
+
+  lambda_norm:
+    - 0.001
+    - 0.01
+    - 0.1
+
+  target_norm:
+    - 25.0   # Small weights (avg 0.25 per weight)
+    - 50.0   # Moderate weights (avg 0.5 per weight)
+    - 100.0  # Larger weights (avg 1.0 per weight)
+
+# Data parameters
+data:
+  n_train_points: 10000
+  n_test_points: 2000
+  load_from_disk: true
+  save_to_disk: true
+
+# Output settings
+output:
+  results_dir: ./grid_search_results
+  save_plots: true
+  save_checkpoints: true
+  track_weights: true
+
+# Random seed for reproducibility
+seed: 42
