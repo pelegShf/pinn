@@ -9,6 +9,7 @@ import numpy as np
 import os
 from pathlib import Path
 from datetime import datetime
+from utils import plot_model1_training, plot_model1_weights
 
 import config
 from models import Model1, Model2, wave_equation_residual
@@ -112,16 +113,32 @@ def loss_function_model2(model2, x, t, u_true, model1_frozen):
     # Loss: mean of Z (we want Z -> 0)
     # Note: We use mean(Z) not mean(|Z|) because Model1 was trained with mean(|Z|)
     # and should output values close to 0 for correct triplets
-    loss = torch.mean(Z)
+    loss = torch.mean(torch.abs(Z))
 
-    # Compute MSE with true solution for monitoring (not used in backprop)
+    # Debug metrics (monitoring only; no gradients)
     with torch.no_grad():
         mse = nn.MSELoss()(u_tilda, u_true)
+        Z_abs_mean = torch.mean(torch.abs(Z))
+        # Compare validator outputs on true u and on zero baseline
+        Z_true = model1_frozen(x, t, u_true)
+        Z_zero = model1_frozen(x, t, torch.zeros_like(u_true))
+        Z_true_mean = torch.mean(Z_true)
+        Z_zero_mean = torch.mean(Z_zero)
+        # Scale-invariant relation diagnostic: correlation between u_tilda and u_true
+        ut = u_tilda.view(-1)
+        u = u_true.view(-1)
+        ut_c = ut - ut.mean()
+        u_c = u - u.mean()
+        corr = torch.dot(ut_c, u_c) / (ut_c.norm() * u_c.norm() + 1e-8)
 
     loss_dict = {
         'total': loss.item(),
         'Z_mean': torch.mean(Z).item(),
         'Z_std': torch.std(Z).item(),
+        'Z_abs_mean': Z_abs_mean.item(),
+        'Z_true_mean': Z_true_mean.item(),
+        'Z_zero_mean': Z_zero_mean.item(),
+        'corr': corr.item(),
         'mse_vs_true': mse.item(),  # For monitoring convergence
         'u_tilda_mean': torch.mean(u_tilda).item(),
         'u_tilda_std': torch.std(u_tilda).item(),
@@ -179,6 +196,10 @@ def train_model(
     if model_name == "model2":
         history['Z_mean'] = []
         history['Z_std'] = []
+        history['Z_abs_mean'] = []
+        history['Z_true_mean'] = []
+        history['Z_zero_mean'] = []
+        history['corr'] = []
         history['mse_vs_true'] = []
         history['u_tilda_mean'] = []
         history['u_tilda_std'] = []
@@ -235,7 +256,7 @@ def train_model(
                     # For Model2, test loss is Z mean from Model1
                     u_tilda = model(x, t)
                     Z = model1_frozen(x, t, u_tilda)
-                    test_loss = torch.mean(Z)
+                    test_loss = torch.mean(torch.abs(Z))
                 else:
                     # Fallback: MSE with true solution
                     u_pred = model(x, t)
@@ -267,12 +288,25 @@ def train_model(
         elif model_name == "model2":
             history['Z_mean'].append(avg_loss_dict.get('Z_mean', 0))
             history['Z_std'].append(avg_loss_dict.get('Z_std', 0))
+            history['Z_abs_mean'].append(avg_loss_dict.get('Z_abs_mean', 0))
+            history['Z_true_mean'].append(avg_loss_dict.get('Z_true_mean', 0))
+            history['Z_zero_mean'].append(avg_loss_dict.get('Z_zero_mean', 0))
+            history['corr'].append(avg_loss_dict.get('corr', 0))
             history['mse_vs_true'].append(avg_loss_dict.get('mse_vs_true', 0))
             history['u_tilda_mean'].append(avg_loss_dict.get('u_tilda_mean', 0))
             history['u_tilda_std'].append(avg_loss_dict.get('u_tilda_std', 0))
 
         # Print progress
         if (epoch + 1) % config.PLOT_EVERY == 0 or epoch == 0:
+            # Batch-scale snapshot (first batch already processed)
+            try:
+                print(
+                    f"[epoch {epoch+1}] x[{x.min().item():.4f},{x.max().item():.4f}] "
+                    f"t[{t.min().item():.4f},{t.max().item():.4f}] "
+                    f"u[{u.min().item():.4f},{u.max().item():.4f}]"
+                )
+            except Exception:
+                pass
             if model_name == "model1":
                 print(
                     f"Epoch [{epoch+1}/{epochs}] "
@@ -285,6 +319,10 @@ def train_model(
                 print(
                     f"Epoch [{epoch+1}/{epochs}] "
                     f"Train Loss (Z_mean): {avg_train_loss:.6f} "
+                    f"|Z|_mean: {avg_loss_dict.get('Z_abs_mean', 0):.6f} "
+                    f"Z(true)_mean: {avg_loss_dict.get('Z_true_mean', 0):.6f} "
+                    f"Z(0)_mean: {avg_loss_dict.get('Z_zero_mean', 0):.6f} "
+                    f"corr(u_tilda,u): {avg_loss_dict.get('corr', 0):.4f} "
                     f"MSE vs True: {avg_loss_dict.get('mse_vs_true', 0):.6f} "
                     f"Test Loss: {avg_test_loss:.6f}"
                 )
@@ -321,6 +359,8 @@ def main():
     # Set random seeds
     torch.manual_seed(config.SEED)
     np.random.seed(config.SEED)
+    
+    run_both_models = config.RUN_BOTH_MODELS # 0 runs both, 1 runs only Model 1, 2 runs only Model 2
 
     # Create directories
     Path(config.CHECKPOINT_DIR).mkdir(exist_ok=True)
@@ -334,95 +374,128 @@ def main():
         load_from_disk=True,
         save_to_disk=True
     )
+    # Scale diagnostics for datasets
+    try:
+        x_train = train_loader.dataset.x.detach().cpu().numpy().flatten()
+        t_train = train_loader.dataset.t.detach().cpu().numpy().flatten()
+        u_train = train_loader.dataset.u.detach().cpu().numpy().flatten()
+        print(
+            f"x_train range: [{x_train.min():.6f}, {x_train.max():.6f}] "
+            f"mean={x_train.mean():.6f} std={x_train.std():.6f}"
+        )
+        print(
+            f"t_train range: [{t_train.min():.6f}, {t_train.max():.6f}] "
+            f"mean={t_train.mean():.6f} std={t_train.std():.6f}"
+        )
+        print(
+            f"u_train range: [{u_train.min():.6f}, {u_train.max():.6f}] "
+            f"mean={u_train.mean():.6f} std={u_train.std():.6f}"
+        )
+    except Exception as e:
+        print(f"Could not compute dataset scale diagnostics: {e}")
+    model1_final_path = Path(config.CHECKPOINT_DIR) / f"model1_final_epoch_{config.MODEL1_CONFIG['epochs']}.pt"
+
     print(f"Train samples: {len(train_loader.dataset)}")
     print(f"Test samples: {len(test_loader.dataset)}")
-
-    # ==================== Train Model 1 ====================
-    print("\n" + "=" * 60)
-    print("TRAINING MODEL 1")
-    print("=" * 60)
-
-    model1 = Model1(config.MODEL1_CONFIG).to(config.DEVICE)
-    optimizer1 = optim.Adam(model1.parameters(), lr=config.MODEL1_CONFIG['learning_rate'])
-
-    history1 = train_model(
-        model=model1,
-        train_loader=train_loader,
-        test_loader=test_loader,
-        loss_function=loss_function_model1,
-        optimizer=optimizer1,
-        epochs=config.MODEL1_CONFIG['epochs'],
-        model_name="model1",
-        track_weights=True,  # Enable weight tracking for Model1
-    )
-
-    # Save final model
-    save_checkpoint(
-        model1, optimizer1, config.MODEL1_CONFIG['epochs'] - 1, history1, "model1_final"
-    )
-
-    # Plot results for Model1
-    from utils import plot_model1_training, plot_model1_weights
-    from datetime import datetime
-    # Save each on a date/time folder
+    
     date_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = Path(config.RESULTS_DIR) / date_time
     results_dir.mkdir(exist_ok=True)
-    plot_model1_training(history1, save_path=f"{results_dir}/model1_training.png")
-    if 'weights' in history1:
-        plot_model1_weights(history1, save_path=f"{results_dir}/model1_weights.png")
+    if run_both_models == 0 or run_both_models == 1:
+        # ==================== Train Model 1 ====================
+        print("\n" + "=" * 60)
+        print("TRAINING MODEL 1")
+        print("=" * 60)
+        model1 = Model1(config.MODEL1_CONFIG).to(config.DEVICE)
+        optimizer1 = optim.Adam(model1.parameters(), lr=config.MODEL1_CONFIG['learning_rate'])
 
-    # ==================== Train Model 2 ====================
-    print("\n" + "=" * 60)
-    print("TRAINING MODEL 2")
-    print("=" * 60)
-
-    # Load pretrained Model1 as frozen validator
-    print("Loading pretrained Model1 as validator...")
-    model1_checkpoint_path = Path(config.MODEL2_CONFIG['model1_checkpoint'])
-
-    if not model1_checkpoint_path.exists():
-        print(f"ERROR: Pretrained Model1 checkpoint not found at {model1_checkpoint_path}")
-        print("Please train Model1 first or update the checkpoint path in config.py")
-        print("Skipping Model2 training...")
-    else:
-        # Load Model1 checkpoint
-        checkpoint = torch.load(model1_checkpoint_path, map_location=config.DEVICE)
-        model1_frozen = Model1(config.MODEL1_CONFIG).to(config.DEVICE)
-        model1_frozen.load_state_dict(checkpoint['model_state_dict'])
-        model1_frozen.eval()
-
-        # Freeze Model1 parameters
-        for param in model1_frozen.parameters():
-            param.requires_grad = False
-
-        print(f"Loaded pretrained Model1 from {model1_checkpoint_path}")
-
-        # Create Model2
-        model2 = Model2(config.MODEL2_CONFIG).to(config.DEVICE)
-        optimizer2 = optim.Adam(model2.parameters(), lr=config.MODEL2_CONFIG['learning_rate'])
-
-        # Train Model2
-        history2 = train_model(
-            model=model2,
+        history1 = train_model(
+            model=model1,
             train_loader=train_loader,
             test_loader=test_loader,
-            loss_function=loss_function_model2,
-            optimizer=optimizer2,
-            epochs=config.MODEL2_CONFIG['epochs'],
-            model_name="model2",
-            track_weights=False,
-            model1_frozen=model1_frozen,  # Pass frozen Model1
+            loss_function=loss_function_model1,
+            optimizer=optimizer1,
+            epochs=config.MODEL1_CONFIG['epochs'],
+            model_name="model1",
+            track_weights=True,  # Enable weight tracking for Model1
         )
 
         # Save final model
         save_checkpoint(
-            model2, optimizer2, config.MODEL2_CONFIG['epochs'] - 1, history2, "model2_final"
+            model1, optimizer1, config.MODEL1_CONFIG['epochs'] - 1, history1, "model1_final"
+        )
+        # Path to the freshly saved final Model1 checkpoint
+        model1_final_path = Path(config.CHECKPOINT_DIR) / f"model1_final_epoch_{config.MODEL1_CONFIG['epochs']}.pt"
+
+        # Plot results for Model1
+        # Save each on a date/time folder
+
+        plot_model1_training(history1, save_path=f"{results_dir}/model1_training.png")
+        if 'weights' in history1:
+            plot_model1_weights(history1, save_path=f"{results_dir}/model1_weights.png")
+
+    # ==================== Train Model 2 ====================
+    
+    if run_both_models == 0 or run_both_models == 2:
+        print("\n" + "=" * 60)
+        print("TRAINING MODEL 2")
+        print("=" * 60)
+
+        # Load pretrained Model1 as frozen validator
+        print("Loading pretrained Model1 as validator...")
+        # Prefer the freshly saved Model1 from this run; fallback to configured path
+        model1_checkpoint_path = (
+            model1_final_path if model1_final_path.exists() else Path(config.MODEL2_CONFIG['model1_checkpoint'])
         )
 
-        # Plot results for Model2
-        from utils import plot_model2_training
-        plot_model2_training(history2, save_path=f"{results_dir}/model2_training.png")
+        if not model1_checkpoint_path.exists():
+            print(f"ERROR: Pretrained Model1 checkpoint not found at {model1_checkpoint_path}")
+            print("Please train Model1 first or update the checkpoint path in config.py")
+            print("Skipping Model2 training...")
+        else:
+            # Load Model1 checkpoint
+            checkpoint = torch.load(
+                model1_checkpoint_path,
+                map_location=config.DEVICE,
+                weights_only=False,  # allow full unpickling of trusted local checkpoint
+            )
+            model1_frozen = Model1(config.MODEL1_CONFIG).to(config.DEVICE)
+            model1_frozen.load_state_dict(checkpoint['model_state_dict'])
+            model1_frozen.eval()
+
+            # Freeze Model1 parameters
+            for param in model1_frozen.parameters():
+                param.requires_grad = False
+
+            print(f"Loaded pretrained Model1 from {model1_checkpoint_path}")
+
+            # Create Model2
+            model2 = Model2(config.MODEL2_CONFIG).to(config.DEVICE)
+            optimizer2 = optim.Adam(model2.parameters(), lr=config.MODEL2_CONFIG['learning_rate'])
+
+            # Train Model2
+            history2 = train_model(
+                model=model2,
+                train_loader=train_loader,
+                test_loader=test_loader,
+                loss_function=loss_function_model2,
+                optimizer=optimizer2,
+                epochs=config.MODEL2_CONFIG['epochs'],
+                model_name="model2",
+                track_weights=False,
+                model1_frozen=model1_frozen,  # Pass frozen Model1
+            )
+
+            # Save final model
+            save_checkpoint(
+                model2, optimizer2, config.MODEL2_CONFIG['epochs'] - 1, history2, "model2_final"
+            )
+
+            # Plot results for Model2
+            from utils import plot_model2_training, plot_model2_u_comparison
+            plot_model2_training(history2, save_path=f"{results_dir}/model2_training.png")
+            # Compare u_true vs u_tilda with heatmaps and difference
+            plot_model2_u_comparison(model2, grid_dataset, save_path=f"{results_dir}/model2_u_vs_utilda.png")
 
     print("\n" + "=" * 60)
     print("TRAINING COMPLETED!")

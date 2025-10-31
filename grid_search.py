@@ -81,15 +81,16 @@ def run_experiment(exp_id, hyperparams, cfg, train_loader, test_loader, results_
     # Create model
     model = Model1().to(config.DEVICE)
 
-    # Create optimizer with specified learning rate
-    optimizer = optim.Adam(model.parameters(), lr=hyperparams['learning_rate'])
+    # Create optimizer with specified learning rate (model 1)
+    lr_m1 = hyperparams.get('learning_rate_model1', hyperparams.get('learning_rate'))
+    optimizer = optim.Adam(model.parameters(), lr=lr_m1)
 
     # Update config with hyperparameters for this experiment
     temp_config = config.MODEL1_CONFIG.copy()
     temp_config['lambda_z'] = hyperparams['lambda_z']
     temp_config['lambda_norm'] = hyperparams['lambda_norm']
     temp_config['target_norm'] = hyperparams['target_norm']
-    temp_config['learning_rate'] = hyperparams['learning_rate']
+    temp_config['learning_rate'] = lr_m1
 
     # Temporarily update the global config
     original_config = config.MODEL1_CONFIG.copy()
@@ -332,6 +333,7 @@ def main():
     print("LOADING DATASETS")
     print("=" * 70)
     train_loader, test_loader, grid_dataset = get_dataloaders(
+        batch_size=cfg['training']['batch_size'],
         load_from_disk=cfg['data']['load_from_disk'],
         save_to_disk=cfg['data']['save_to_disk']
     )

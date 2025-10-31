@@ -65,7 +65,7 @@ def plot_training_history(history, save_path=None):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Training history plot saved: {save_path}")
 
-    plt.show()
+    # plt.show()
 
 
 def plot_predictions(model, grid_dataset, save_path=None):
@@ -137,7 +137,7 @@ def plot_predictions(model, grid_dataset, save_path=None):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Predictions plot saved: {save_path}")
 
-    plt.show()
+    # plt.show()
 
 
 def plot_error_analysis(model, grid_dataset, save_path=None):
@@ -232,7 +232,7 @@ def plot_error_analysis(model, grid_dataset, save_path=None):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Error analysis plot saved: {save_path}")
 
-    plt.show()
+    # plt.show()
 
     # Print error statistics
     print("\nError Statistics:")
@@ -289,7 +289,7 @@ def plot_wave_animation(model, grid_dataset, num_frames=50, save_path=None):
     if save_path:
         print(f"Animation displayed (save functionality requires additional setup)")
 
-    plt.show()
+    # plt.show()
 
 
 def plot_model1_training(history, save_path=None):
@@ -404,7 +404,7 @@ def plot_model1_training(history, save_path=None):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Model 1 training plot saved: {save_path}")
 
-    plt.show()
+    # plt.show()
 
 
 def plot_model1_weights(history, save_path=None):
@@ -483,7 +483,7 @@ def plot_model1_weights(history, save_path=None):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Model 1 weights plot saved: {save_path}")
 
-    plt.show()
+    # plt.show()
 
     # Print summary statistics
     print("\n" + "=" * 60)
@@ -618,8 +618,90 @@ def plot_model2_training(history, save_path=None):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Model 2 training plot saved: {save_path}")
 
-    plt.show()
+    # plt.show()
 
+
+def plot_model2_u_comparison(model, grid_dataset, save_path=None):
+    """
+    Compare ground truth u to Model 2's u_tilda on the visualization grid.
+
+    Produces heatmaps for u_true, u_tilda, and (u_tilda - u_true), plus snapshots.
+
+    Args:
+        model: trained Model 2 instance
+        grid_dataset: WaveDatasetGrid instance
+        save_path: optional file path to save the figure
+    """
+    model.eval()
+
+    with torch.no_grad():
+        x = grid_dataset.x
+        t = grid_dataset.t
+        u_true = grid_dataset.u
+
+        u_tilda = model(x, t)
+
+        nx, nt = grid_dataset.nx, grid_dataset.nt
+        X = grid_dataset.X
+        T = grid_dataset.T
+        U_true = u_true.cpu().numpy().reshape(nt, nx)
+        U_tilda = u_tilda.cpu().numpy().reshape(nt, nx)
+        Diff = (U_tilda - U_true)
+
+    # Common limits for consistent color scaling
+    u_min = min(U_true.min(), U_tilda.min())
+    u_max = max(U_true.max(), U_tilda.max())
+    diff_abs_max = max(abs(Diff.min()), abs(Diff.max()))
+
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(18, 10))
+    fig.suptitle('Model 2: u vs u_tilda on Grid', fontsize=16, fontweight='bold')
+
+    # u_true heatmap
+    ax1 = plt.subplot(2, 3, 1)
+    im1 = ax1.contourf(X, T, U_true, levels=60, cmap='viridis', vmin=u_min, vmax=u_max)
+    ax1.set_title('u_true (heatmap)')
+    ax1.set_xlabel('x')
+    ax1.set_ylabel('t')
+    fig.colorbar(im1, ax=ax1)
+
+    # u_tilda heatmap
+    ax2 = plt.subplot(2, 3, 2)
+    im2 = ax2.contourf(X, T, U_tilda, levels=60, cmap='viridis', vmin=u_min, vmax=u_max)
+    ax2.set_title('u_tilda (heatmap)')
+    ax2.set_xlabel('x')
+    ax2.set_ylabel('t')
+    fig.colorbar(im2, ax=ax2)
+
+    # Diff heatmap
+    ax3 = plt.subplot(2, 3, 3)
+    im3 = ax3.contourf(X, T, Diff, levels=60, cmap='RdBu_r', vmin=-diff_abs_max, vmax=diff_abs_max)
+    ax3.set_title('Difference (u_tilda - u_true)')
+    ax3.set_xlabel('x')
+    ax3.set_ylabel('t')
+    fig.colorbar(im3, ax=ax3)
+
+    # Time slice comparisons (four snapshots)
+    ax4 = plt.subplot(2, 1, 2)
+    time_indices = [0, nt // 3, 2 * nt // 3, nt - 1]
+    for idx in time_indices:
+        t_val = T[idx, 0]
+        ax4.plot(X[idx, :], U_true[idx, :], '-', alpha=0.7, label=f't={t_val:.3f} true')
+        ax4.plot(X[idx, :], U_tilda[idx, :], '--', alpha=0.9, label=f't={t_val:.3f} tilda')
+    ax4.set_xlabel('x')
+    ax4.set_ylabel('u(x,t)')
+    ax4.set_title('Snapshots: u_true vs u_tilda')
+    ax4.grid(True, alpha=0.3)
+    ax4.legend(ncol=2, fontsize=9)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Model 2 u vs u_tilda comparison saved: {save_path}")
+
+    # plt.show()
 
 if __name__ == "__main__":
     # Test plotting functions with dummy data

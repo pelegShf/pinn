@@ -11,29 +11,32 @@ model:
 
 # Training parameters
 training:
-  epochs: 2000
+  epochs: 2500
   batch_size: 256
 
 # Grid search parameters
 # Each parameter can have multiple values to try
 grid_search:
-  learning_rate:
+  # Separate LRs for each model. For this script (Model 1), learning_rate_model1 is used.
+  learning_rate_model1:
+    - 0.001
+    - 0.0005
+    - 0.0001
+  # Define for future use (e.g., if extending grid to Model 2)
+  learning_rate_model2:
     - 0.001
     - 0.0005
     - 0.0001
 
   lambda_z:
-    - 0.5
     - 1.0
-    - 2.0
+
 
   lambda_norm:
-    - 0.001
     - 0.01
-    - 0.1
 
   target_norm:
-    - 25.0   # Small weights (avg 0.25 per weight)
+    - 10.0   # Small weights (avg 0.1 per weight)
     - 50.0   # Moderate weights (avg 0.5 per weight)
     - 100.0  # Larger weights (avg 1.0 per weight)
 

@@ -6,6 +6,10 @@ import torch.nn as nn
 import config
 
 
+class Sine(nn.Module):
+    def forward(self, x):
+        return torch.sin(x)
+
 class PINN(nn.Module):
     """
     Base Physics-Informed Neural Network
@@ -41,7 +45,9 @@ class PINN(nn.Module):
                 layers.append(nn.ReLU())
             elif activation == 'sigmoid':
                 layers.append(nn.Sigmoid())
-
+            elif activation == 'sin':
+                layers.append(Sine())
+                
             layers.append(nn.Linear(hidden_layers[i], hidden_layers[i + 1]))
 
         # Output layer
@@ -51,6 +57,8 @@ class PINN(nn.Module):
             layers.append(nn.ReLU())
         elif activation == 'sigmoid':
             layers.append(nn.Sigmoid())
+        elif activation == 'sin':
+            layers.append(Sine())
 
         layers.append(nn.Linear(hidden_layers[-1], output_dim))
 

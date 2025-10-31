@@ -77,12 +77,16 @@ class WaveDataset(Dataset):
         self.x_range = x_range
         self.t_range = t_range
 
-        # Generate collocation points uniformly in the domain
-        x = np.random.uniform(x_range[0], x_range[1], n_points)
-        t = np.random.uniform(t_range[0], t_range[1], n_points)
+        # Generate collocation points uniformly in the domain (physical)
+        x_phys = np.random.uniform(x_range[0], x_range[1], n_points)
+        t_phys = np.random.uniform(t_range[0], t_range[1], n_points)
 
-        # Compute analytical solution
-        u = analytical_solution(x, t, c=config.WAVE_SPEED)
+        # Compute analytical solution (on physical coordinates)
+        u = analytical_solution(x_phys, t_phys, c=config.WAVE_SPEED)
+
+        # No normalization: use physical coordinates
+        x = x_phys
+        t = t_phys
 
         # Convert to tensors
         self.x = torch.FloatTensor(x).reshape(-1, 1).to(device)
@@ -178,26 +182,31 @@ class WaveDatasetGrid(Dataset):
 
         self.device = device
 
-        # Create meshgrid
-        x_vals = np.linspace(x_range[0], x_range[1], nx)
-        t_vals = np.linspace(t_range[0], t_range[1], nt)
-        X, T = np.meshgrid(x_vals, t_vals)
+        # Create meshgrid (physical axes for visualization)
+        x_vals_phys = np.linspace(x_range[0], x_range[1], nx)
+        t_vals_phys = np.linspace(t_range[0], t_range[1], nt)
+        X, T = np.meshgrid(x_vals_phys, t_vals_phys)
 
-        # Flatten
-        x = X.flatten()
-        t = T.flatten()
+        # Flatten physical coords for solution
+        x_phys_flat = X.flatten()
+        t_phys_flat = T.flatten()
 
-        # Compute analytical solution
-        u = analytical_solution(x, t, c=config.WAVE_SPEED)
+        # Compute analytical solution (physical)
+        u = analytical_solution(x_phys_flat, t_phys_flat, c=config.WAVE_SPEED)
+
+        # No normalization: model inputs are physical coordinates
+        x_flat = x_phys_flat
+        t_flat = t_phys_flat
 
         # Convert to tensors
-        self.x = torch.FloatTensor(x).reshape(-1, 1).to(device)
-        self.t = torch.FloatTensor(t).reshape(-1, 1).to(device)
+        self.x = torch.FloatTensor(x_flat).reshape(-1, 1).to(device)
+        self.t = torch.FloatTensor(t_flat).reshape(-1, 1).to(device)
         self.u = torch.FloatTensor(u).reshape(-1, 1).to(device)
 
         # Store grid dimensions for reshaping
         self.nx = nx
         self.nt = nt
+        # Keep physical axes for plotting
         self.X = X
         self.T = T
 
@@ -271,13 +280,21 @@ def get_dataloaders(batch_size=None, load_from_disk=False, save_to_disk=False, d
     # Load or create datasets
     if load_from_disk and train_path.exists() and test_path.exists() and grid_path.exists():
         print("Loading datasets from disk...")
-        train_dataset = WaveDataset.load(train_path)
-        test_dataset = WaveDataset.load(test_path)
+        if getattr(config, 'USE_GRID_SAMPLING', False):
+            train_dataset = WaveDatasetGrid.load(train_path)
+            test_dataset = WaveDatasetGrid.load(test_path)
+        else:
+            train_dataset = WaveDataset.load(train_path)
+            test_dataset = WaveDataset.load(test_path)
         test_grid_dataset = WaveDatasetGrid.load(grid_path)
     else:
         print("Generating datasets...")
-        train_dataset = WaveDataset(config.N_TRAIN_POINTS)
-        test_dataset = WaveDataset(config.N_TEST_POINTS)
+        if getattr(config, 'USE_GRID_SAMPLING', False):
+            train_dataset = WaveDatasetGrid(nx=config.GRID_NX_TRAIN, nt=config.GRID_NT_TRAIN)
+            test_dataset = WaveDatasetGrid(nx=config.GRID_NX_TEST, nt=config.GRID_NT_TEST)
+        else:
+            train_dataset = WaveDataset(config.N_TRAIN_POINTS)
+            test_dataset = WaveDataset(config.N_TEST_POINTS)
         test_grid_dataset = WaveDatasetGrid(nx=200, nt=100)
 
         # Save if requested
@@ -288,7 +305,7 @@ def get_dataloaders(batch_size=None, load_from_disk=False, save_to_disk=False, d
             test_grid_dataset.save(grid_path)
 
     # Create dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     return train_loader, test_loader, test_grid_dataset
