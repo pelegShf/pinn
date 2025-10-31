@@ -13,7 +13,7 @@ from utils import plot_model1_training, plot_model1_weights
 
 import config
 from models import Model1, Model2, wave_equation_residual
-from dataset import get_dataloaders
+from dataset import get_dataloaders, get_patch_dataloaders
 from utils import plot_training_history, plot_predictions, plot_error_analysis
 
 
@@ -78,6 +78,49 @@ def loss_function_model1(model, x, t, u_true):
     return loss, loss_dict
 
 
+def loss_function_model1_patches(model, patches):
+    """
+    Loss function for Model 1 when using N×N patches.
+
+    patches: (batch_size, 3, N, N) -> flatten to (batch_size, 3*N*N)
+    """
+    B = patches.shape[0]
+    vec = patches.view(B, -1)
+
+    # Forward pass with flattened patch vector
+    Z = model.forward_vector(vec)
+
+    # Term 1: mean absolute value of Z
+    loss_z = torch.mean(torch.abs(Z))
+
+    # Term 2: Target norm regularization for last layer weights
+    last_layer = model.network[-1]
+    weights = last_layer.weight
+
+    l1_norm = torch.sum(torch.abs(weights))
+    lambda_z = config.MODEL1_CONFIG.get('lambda_z', 1.0)
+    lambda_norm = config.MODEL1_CONFIG.get('lambda_norm', 0.01)
+    target_norm = config.MODEL1_CONFIG.get('target_norm', 50.0)
+
+    norm_deviation = l1_norm - target_norm
+    loss_norm = norm_deviation ** 2
+
+    loss = lambda_z * loss_z + lambda_norm * loss_norm
+
+    loss_dict = {
+        'total': loss.item(),
+        'loss_z': loss_z.item(),
+        'loss_norm': loss_norm.item(),
+        'l1_norm': l1_norm.item(),
+        'norm_deviation': norm_deviation.item(),
+        'Z_mean': torch.mean(Z).item(),
+        'Z_std': torch.std(Z).item(),
+        'Z_abs_mean': loss_z.item(),
+    }
+
+    return loss, loss_dict
+
+
 def loss_function_model2(model2, x, t, u_true, model1_frozen):
     """
     Loss function for Model 2
@@ -103,6 +146,16 @@ def loss_function_model2(model2, x, t, u_true, model1_frozen):
     """
     # Model2 generates u_tilda
     u_tilda = model2(x, t)
+
+    with torch.no_grad():
+        loader = WavePatchDataset(train_grid, patch_size=N)
+        model1_frozen.eval()
+        for batch in test_loader:
+            if model_name == "model1" and getattr(config, 'USE_PATCHES_FOR_MODEL1', False):
+                patches = batch.to(config.DEVICE)
+                B = patches.shape[0]
+                vec = patches.view(B, -1)
+                Z = model1_frozen.forward_vector(vec)
 
     # Pass triplet (x, t, u_tilda) to frozen Model1
     with torch.no_grad():
@@ -213,17 +266,22 @@ def train_model(
         train_losses = []
         epoch_loss_dicts = []
 
-        for batch_idx, (x, t, u) in enumerate(train_loader):
-            x, t, u = x.to(config.DEVICE), t.to(config.DEVICE), u.to(config.DEVICE)
-
+        for batch_idx, batch in enumerate(train_loader):
             # Zero gradients
             optimizer.zero_grad()
 
-            # Compute loss
-            if model_name == "model2" and model1_frozen is not None:
-                loss, loss_dict = loss_function(model, x, t, u, model1_frozen)
+            if model_name == "model1" and getattr(config, 'USE_PATCHES_FOR_MODEL1', False):
+                # Batch of patches: (B, 3, N, N)
+                patches = batch.to(config.DEVICE)
+                loss, loss_dict = loss_function_model1_patches(model, patches)
             else:
-                loss, loss_dict = loss_function(model, x, t, u)
+                # Standard triplet batches (x, t, u)
+                x, t, u = batch
+                x, t, u = x.to(config.DEVICE), t.to(config.DEVICE), u.to(config.DEVICE)
+                if model_name == "model2" and model1_frozen is not None:
+                    loss, loss_dict = loss_function(model, x, t, u, model1_frozen)
+                else:
+                    loss, loss_dict = loss_function(model, x, t, u)
 
             # Backward pass
             loss.backward()
@@ -245,22 +303,27 @@ def train_model(
         model.eval()
         test_losses = []
         with torch.no_grad():
-            for x, t, u in test_loader:
-                x, t, u = x.to(config.DEVICE), t.to(config.DEVICE), u.to(config.DEVICE)
-
-                # Different test loss for Model1 vs Model2
-                if model_name == "model1":
-                    Z = model(x, t, u)
-                    test_loss = torch.mean(torch.abs(Z))
-                elif model_name == "model2" and model1_frozen is not None:
-                    # For Model2, test loss is Z mean from Model1
-                    u_tilda = model(x, t)
-                    Z = model1_frozen(x, t, u_tilda)
+            for batch in test_loader:
+                if model_name == "model1" and getattr(config, 'USE_PATCHES_FOR_MODEL1', False):
+                    patches = batch.to(config.DEVICE)
+                    B = patches.shape[0]
+                    vec = patches.view(B, -1)
+                    Z = model.forward_vector(vec)
                     test_loss = torch.mean(torch.abs(Z))
                 else:
-                    # Fallback: MSE with true solution
-                    u_pred = model(x, t)
-                    test_loss = nn.MSELoss()(u_pred, u)
+                    x, t, u = batch
+                    x, t, u = x.to(config.DEVICE), t.to(config.DEVICE), u.to(config.DEVICE)
+
+                    if model_name == "model1":
+                        Z = model(x, t, u)
+                        test_loss = torch.mean(torch.abs(Z))
+                    elif model_name == "model2" and model1_frozen is not None:
+                        u_tilda = model(x, t)
+                        Z = model1_frozen(x, t, u_tilda)
+                        test_loss = torch.mean(torch.abs(Z))
+                    else:
+                        u_pred = model(x, t)
+                        test_loss = nn.MSELoss()(u_pred, u)
 
                 test_losses.append(test_loss.item())
 
@@ -298,13 +361,27 @@ def train_model(
 
         # Print progress
         if (epoch + 1) % config.PLOT_EVERY == 0 or epoch == 0:
-            # Batch-scale snapshot (first batch already processed)
+            # Batch-scale snapshot
             try:
-                print(
-                    f"[epoch {epoch+1}] x[{x.min().item():.4f},{x.max().item():.4f}] "
-                    f"t[{t.min().item():.4f},{t.max().item():.4f}] "
-                    f"u[{u.min().item():.4f},{u.max().item():.4f}]"
-                )
+                if model_name == "model1" and getattr(config, 'USE_PATCHES_FOR_MODEL1', False):
+                    # Recompute a quick range from last seen training loss inputs if available
+                    # Fetch one small batch from train_loader for logging
+                    patches_sample = next(iter(train_loader))
+                    ps = patches_sample.to(config.DEVICE)
+                    x_ch = ps[:, 0, :, :]
+                    t_ch = ps[:, 1, :, :]
+                    u_ch = ps[:, 2, :, :]
+                    print(
+                        f"[epoch {epoch+1}] x[{x_ch.min().item():.4f},{x_ch.max().item():.4f}] "
+                        f"t[{t_ch.min().item():.4f},{t_ch.max().item():.4f}] "
+                        f"u[{u_ch.min().item():.4f},{u_ch.max().item():.4f}]"
+                    )
+                else:
+                    print(
+                        f"[epoch {epoch+1}] x[{x.min().item():.4f},{x.max().item():.4f}] "
+                        f"t[{t.min().item():.4f},{t.max().item():.4f}] "
+                        f"u[{u.min().item():.4f},{u.max().item():.4f}]"
+                    )
             except Exception:
                 pass
             if model_name == "model1":
@@ -367,18 +444,27 @@ def main():
     Path(config.RESULTS_DIR).mkdir(exist_ok=True)
 
     # Get dataloaders
-    # Set load_from_disk=True to load saved datasets (faster)
-    # Set save_to_disk=True to save generated datasets for future use
+    # Model1 can use patch loaders; Model2 continues to use standard loaders
     print("Loading datasets...")
-    train_loader, test_loader, grid_dataset = get_dataloaders(
+    use_patches = getattr(config, 'USE_PATCHES_FOR_MODEL1', False)
+    if use_patches:
+        train_loader_m1, test_loader_m1, grid_dataset = get_patch_dataloaders()
+    else:
+        train_loader_m1, test_loader_m1, grid_dataset = get_dataloaders(
+            load_from_disk=True,
+            save_to_disk=True
+        )
+
+    # Separate standard loaders for Model2 (unchanged)
+    train_loader_std, test_loader_std, grid_dataset_std = get_dataloaders(
         load_from_disk=True,
         save_to_disk=True
     )
     # Scale diagnostics for datasets
     try:
-        x_train = train_loader.dataset.x.detach().cpu().numpy().flatten()
-        t_train = train_loader.dataset.t.detach().cpu().numpy().flatten()
-        u_train = train_loader.dataset.u.detach().cpu().numpy().flatten()
+        x_train = train_loader_std.dataset.x.detach().cpu().numpy().flatten()
+        t_train = train_loader_std.dataset.t.detach().cpu().numpy().flatten()
+        u_train = train_loader_std.dataset.u.detach().cpu().numpy().flatten()
         print(
             f"x_train range: [{x_train.min():.6f}, {x_train.max():.6f}] "
             f"mean={x_train.mean():.6f} std={x_train.std():.6f}"
@@ -395,8 +481,8 @@ def main():
         print(f"Could not compute dataset scale diagnostics: {e}")
     model1_final_path = Path(config.CHECKPOINT_DIR) / f"model1_final_epoch_{config.MODEL1_CONFIG['epochs']}.pt"
 
-    print(f"Train samples: {len(train_loader.dataset)}")
-    print(f"Test samples: {len(test_loader.dataset)}")
+    print(f"Train samples (Model1 path): {len(train_loader_m1.dataset)}")
+    print(f"Test samples (Model1 path): {len(test_loader_m1.dataset)}")
     
     date_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = Path(config.RESULTS_DIR) / date_time
@@ -411,8 +497,8 @@ def main():
 
         history1 = train_model(
             model=model1,
-            train_loader=train_loader,
-            test_loader=test_loader,
+            train_loader=train_loader_m1,
+            test_loader=test_loader_m1,
             loss_function=loss_function_model1,
             optimizer=optimizer1,
             epochs=config.MODEL1_CONFIG['epochs'],
@@ -476,8 +562,8 @@ def main():
             # Train Model2
             history2 = train_model(
                 model=model2,
-                train_loader=train_loader,
-                test_loader=test_loader,
+                train_loader=train_loader_std,
+                test_loader=test_loader_std,
                 loss_function=loss_function_model2,
                 optimizer=optimizer2,
                 epochs=config.MODEL2_CONFIG['epochs'],

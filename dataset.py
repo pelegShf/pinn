@@ -311,6 +311,105 @@ def get_dataloaders(batch_size=None, load_from_disk=False, save_to_disk=False, d
     return train_loader, test_loader, test_grid_dataset
 
 
+class WavePatchDataset(Dataset):
+    """
+    Produce N×N spatiotemporal patches (X, T, U) from a WaveDatasetGrid.
+
+    - Each sample is a tensor with shape (3, N, N) ordered as (X_patch, T_patch, U_patch).
+    - Patches are centered at every original grid cell (stride=1), with replicate padding at borders.
+    - Iteration order is deterministic: t-major then x (row-major over the grid).
+    """
+
+    def __init__(self, grid_dataset: 'WaveDatasetGrid', patch_size: int = 5, device=None):
+        assert isinstance(grid_dataset, WaveDatasetGrid), "WavePatchDataset requires a WaveDatasetGrid"
+        assert patch_size >= 2, "patch_size must be >= 2"
+        if device is None:
+            device = config.DEVICE
+
+        self.device = device
+        self.grid = grid_dataset
+        self.patch_size = patch_size
+        self.radius = patch_size // 2
+
+        # Shapes
+        nt = grid_dataset.nt
+        nx = grid_dataset.nx
+
+        # Prepare 2D arrays
+        u_np = grid_dataset.u.cpu().numpy().flatten().reshape(nt, nx)
+        X = grid_dataset.X
+        T = grid_dataset.T
+
+        # Replicate padding on all sides so every cell has a centered window
+        pad = self.radius
+        mode = 'edge'
+        U_pad = np.pad(u_np, ((pad, pad), (pad, pad)), mode=mode)
+        X_pad = np.pad(X, ((pad, pad), (pad, pad)), mode=mode)
+        T_pad = np.pad(T, ((pad, pad), (pad, pad)), mode=mode)
+
+        # Precompute patches (ordered, memory-friendly for typical grid sizes)
+        patches = []
+        for it in range(nt):
+            t0 = it
+            for ix in range(nx):
+                x0 = ix
+                sl_t = slice(t0, t0 + 2 * pad + 1)
+                sl_x = slice(x0, x0 + 2 * pad + 1)
+                X_patch = X_pad[sl_t, sl_x]
+                T_patch = T_pad[sl_t, sl_x]
+                U_patch = U_pad[sl_t, sl_x]
+                patch = np.stack([X_patch, T_patch, U_patch], axis=0)  # (3, N, N)
+                patches.append(patch)
+
+        patches_np = np.stack(patches, axis=0)  # (nt*nx, 3, N, N)
+        self.patches = torch.from_numpy(patches_np.astype(np.float32)).to(device)
+
+    def __len__(self):
+        return self.patches.shape[0]
+
+    def __getitem__(self, idx):
+        return self.patches[idx]
+
+
+def get_patch_dataloaders(batch_size=None, data_dir='./data'):
+    """
+    Create ordered patch dataloaders for Model1 using grid datasets.
+
+    - Train grid: GRID_NX_TRAIN × GRID_NT_TRAIN
+    - Test grid:  GRID_NX_TEST × GRID_NT_TEST
+    - No shuffling.
+    """
+    if batch_size is None:
+        batch_size = config.MODEL1_CONFIG['batch_size']
+
+    # Build grid datasets for train/test
+    train_grid = WaveDatasetGrid(
+        nx=config.GRID_NX_TRAIN,
+        nt=config.GRID_NT_TRAIN,
+        x_range=(config.X_MIN, config.X_MAX),
+        t_range=(config.T_MIN, config.T_MAX),
+        device=config.DEVICE,
+    )
+    test_grid = WaveDatasetGrid(
+        nx=config.GRID_NX_TEST,
+        nt=config.GRID_NT_TEST,
+        x_range=(config.X_MIN, config.X_MAX),
+        t_range=(config.T_MIN, config.T_MAX),
+        device=config.DEVICE,
+    )
+
+    # Wrap into patch datasets
+    N = getattr(config, 'PATCH_SIZE', 5)
+    train_patches = WavePatchDataset(train_grid, patch_size=N)
+    test_patches = WavePatchDataset(test_grid, patch_size=N)
+
+    # Ordered loaders (no shuffle)
+    train_loader = DataLoader(train_patches, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_patches, batch_size=batch_size, shuffle=False)
+
+    return train_loader, test_loader, test_grid
+
+
 def visualize_dataset(dataset, title="Dataset Visualization", save_path=None):
     """
     Visualize the dataset

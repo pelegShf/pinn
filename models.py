@@ -163,10 +163,14 @@ class Model1(nn.Module):
     def __init__(self, config_dict=None):
         super(Model1, self).__init__()
 
-        # Fixed architecture: 3 -> 100 -> 100 -> 100 -> 100 -> 100 -> 1
-        input_dim = 3  # (x, t, u)
-        hidden_dim = 100
-        n_layers = 5
+        # Determine input size: triplet (x,t,u) or flattened patch (3*N*N)
+        use_patches = getattr(config, 'USE_PATCHES_FOR_MODEL1', False)
+        patch_size = getattr(config, 'PATCH_SIZE', 5)
+
+        input_dim = 3 * patch_size * patch_size if use_patches else 3
+        # Preserve existing defaults but allow config override
+        hidden_dim = config_dict.get('hidden_dim', 100) if config_dict else 100
+        n_layers = config_dict.get('n_layers', 5) if config_dict else 5
         output_dim = 1  # Z
 
         # Build network layers
@@ -208,10 +212,14 @@ class Model1(nn.Module):
         Returns:
             Z: output scalar (batch_size, 1)
         """
-        # Concatenate inputs
+        # Concatenate inputs (triplet mode)
         inputs = torch.cat([x, t, u], dim=1)  # (batch_size, 3)
         Z = self.network(inputs)
         return Z
+
+    def forward_vector(self, vec):
+        """Forward when input is already a flattened vector (B, 3*N*N)."""
+        return self.network(vec)
 
     def get_last_layer_weights(self):
         """Get weights from last hidden layer to output Z"""

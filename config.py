@@ -14,7 +14,7 @@ T_MIN = 0.0
 T_MAX = 1.0  # 1 period
 
 # Use grid sampling (linspace) for train/test datasets (includes boundaries)
-USE_GRID_SAMPLING = False
+USE_GRID_SAMPLING = True
 
 # Grid sizes when USE_GRID_SAMPLING is True
 GRID_NX_TRAIN = 200
@@ -30,18 +30,18 @@ WAVELENGTH = 2.0        # Wavelength of the wave (can be adjusted)
 # Model 1 hyperparameters
 # Architecture: Input (x,t,u) -> 5 hidden layers (100 each) -> Output Z
 MODEL1_CONFIG = {
-    'input_dim': 3,         # (x, t, u) triplet input
+    'input_dim': 3,         # Overridden to 3*N*N when using patches
     'hidden_dim': 50,      # 100 neurons per layer
     'n_layers': 5,          # 5 hidden layers
     'output_dim': 1,        # Scalar Z
     'activation': 'tanh',
-    'learning_rate': 1e-6,
+    'learning_rate': 1e-4,
     'epochs': 1000,
     'batch_size': 256,
     # Loss weights
     'lambda_z': 1.0,        # Weight for mean(|Z|) term
     'lambda_norm': 0.01,    # Weight for target norm penalty
-    'target_norm': 10.0,     # Target L1 norm for last layer weights
+    'target_norm': 100.0,     # Target L1 norm for last layer weights
                             # (100 weights -> avg 0.01 per weight)
 }
 
@@ -64,6 +64,11 @@ RESULTS_DIR = './results'
 
 # Random seed for reproducibility
 SEED = 42
-RUN_BOTH_MODELS = 2 # "0" runs both, "1" runs only Model 1, "2" runs only Model 2
+RUN_BOTH_MODELS = 1 # "0" runs both, "1" runs only Model 1, "2" runs only Model 2
 
 # Normalize x,t inputs to [-1, 1] in datasets
+
+# Regional patches (x,t,u heatmap neighborhoods) for Model1
+# When enabled, Model1 will receive N×N patches (flattened 3·N·N vector)
+USE_PATCHES_FOR_MODEL1 = True
+PATCH_SIZE = 5  # N in N×N patches (prefer odd for a clear center)
